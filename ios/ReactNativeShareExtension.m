@@ -14,6 +14,16 @@ NSExtensionContext* extensionContext;
     NSString* value;
 }
 
+- (BOOL)isContentValid {
+    // Do validation of contentText and/or NSExtensionContext attachments here
+    return YES;
+}
+
++ (BOOL)requiresMainQueueSetup
+{
+    return YES;
+}
+
 - (UIView*) shareView {
     return nil;
 }
