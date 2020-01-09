@@ -65,19 +65,21 @@ RCT_REMAP_METHOD(data,
                  resolver:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self extractDataFromContext: extensionContext withCallback:^(NSString* val, NSString* contentType, NSException* err) {
+    [self extractDataFromContext: extensionContext withCallback:^(NSException* err, NSString* _url, NSString* _image, NSString* _text) {
         if(err) {
             reject(@"error", err.description, nil);
         } else {
-            resolve(@{
-                      @"type": contentType,
-                      @"value": val
-                      });
+            NSMutableDictionary *shareData = [[NSMutableDictionary alloc] init];
+            [shareData setObject:_url  forKey:@"url"];
+            [shareData setObject:_image  forKey:@"image"];
+            [shareData setObject:_text  forKey:@"text"];
+
+            resolve(shareData);
         }
     }];
 }
 
-- (void)extractDataFromContext:(NSExtensionContext *)context withCallback:(void(^)(NSString *value, NSString* contentType, NSException *exception))callback {
+- (void)extractDataFromContext:(NSExtensionContext *)context withCallback:(void(^)(NSException *exception, NSString* url, NSString* image, NSString* text))callback {
     @try {
         NSExtensionItem *item = [context.inputItems firstObject];
         NSArray *attachments = item.attachments;
@@ -86,52 +88,78 @@ RCT_REMAP_METHOD(data,
         __block NSItemProvider *imageProvider = nil;
         __block NSItemProvider *textProvider = nil;
 
+        __block NSString* url = @"";
+        __block NSString* image = @"";
+        __block NSString* text = @"";
+
+        __block BOOL needUrl = FALSE;
+        __block BOOL needImage = FALSE;
+        __block BOOL needText = FALSE;
+
         [attachments enumerateObjectsUsingBlock:^(NSItemProvider *provider, NSUInteger idx, BOOL *stop) {
             if([provider hasItemConformingToTypeIdentifier:URL_IDENTIFIER]) {
                 urlProvider = provider;
-                *stop = YES;
-            } else if ([provider hasItemConformingToTypeIdentifier:TEXT_IDENTIFIER]){
-                textProvider = provider;
-                *stop = YES;
+                needUrl = TRUE;
             } else if ([provider hasItemConformingToTypeIdentifier:IMAGE_IDENTIFIER]){
                 imageProvider = provider;
-                *stop = YES;
+                needImage = TRUE;
+            } else if ([provider hasItemConformingToTypeIdentifier:TEXT_IDENTIFIER]){
+                textProvider = provider;
+                needText = TRUE;
+
             }
         }];
 
         if(urlProvider) {
             [urlProvider loadItemForTypeIdentifier:URL_IDENTIFIER options:nil completionHandler:^(id<NSSecureCoding> item, NSError *error) {
-                NSURL *url = (NSURL *)item;
-
+                NSURL *_url = (NSURL *)item;
+                url = [_url absoluteString];
+                needUrl = FALSE;
                 if(callback) {
-                    callback([url absoluteString], @"text/plain", nil);
+                    // all providers finished?
+                    if (!needUrl && !needImage && !needText) {
+                        callback(nil, url, image, text);
+                    }
                 }
             }];
-        } else if (imageProvider) {
+        }
+
+        if (imageProvider) {
             [imageProvider loadItemForTypeIdentifier:IMAGE_IDENTIFIER options:nil completionHandler:^(id<NSSecureCoding> item, NSError *error) {
-                NSURL *url = (NSURL *)item;
-
+                NSURL *_url = (NSURL *)item;
+                image = [_url absoluteString];
+                needImage = FALSE;
                 if(callback) {
-                    callback([url absoluteString], [[[url absoluteString] pathExtension] lowercaseString], nil);
+                    // all providers finished?
+                    if (!needUrl && !needImage && !needText) {
+                        callback(nil, url, image, text);
+                    }
                 }
             }];
-        } else if (textProvider) {
+        }
+
+        if (textProvider) {
             [textProvider loadItemForTypeIdentifier:TEXT_IDENTIFIER options:nil completionHandler:^(id<NSSecureCoding> item, NSError *error) {
-                NSString *text = (NSString *)item;
-
+                text = (NSString *)item;
+                needText = FALSE;
                 if(callback) {
-                    callback(text, @"text/plain", nil);
+                    // all providers finished?
+                    if (!needUrl && !needImage && !needText) {
+                        callback(nil, url, image, text);
+                    }
                 }
             }];
-        } else {
-            if(callback) {
-                callback(nil, nil, [NSException exceptionWithName:@"Error" reason:@"couldn't find provider" userInfo:nil]);
+        }
+
+        if (callback) {
+            if (!urlProvider && !imageProvider && !textProvider) {
+                callback([NSException exceptionWithName:@"Error" reason:@"couldn't find provider" userInfo:nil], nil, nil, nil);
             }
         }
     }
     @catch (NSException *exception) {
         if(callback) {
-            callback(nil, nil, exception);
+            callback(exception, nil, nil, nil);
         }
     }
 }
